@@ -21,17 +21,20 @@ ls old_*.fa | while read OLD ; do
 	fi
 done
 
-chainMergeSort "${OUT}_*_aln.chain" | chainSplit chain stdin
+chainMergeSort ${OUT}_*_aln.chain | chainSplit chain stdin
+
+mkdir -p chainMerge
+chainMergeSort chain/*.chain | chainSplit chainMerge stdin -lump=50
+
+cat chainMerge/*.chain > all.chain
+chainSort all.chain all.sorted.chain
 
 fachrlens old.fa > old.chrom.sizes
 fachrlens new.fa > new.chrom.sizes
 
-cd chain
-mkdir -p ../net
+mkdir -p net
 
-ls *.chain | while read i ; do
-	a=`basename "$i" .chain`
-	chainNet "${a}.chain" ../old.chrom.sizes ../new.chrom.sizes "../net/${a}.net" /dev/null
-	mkdir -p ../over
-	netChainSubset "../net/${a}.net" "${a}.chain" "../over/${a}.chain"
-done
+a=`basename "$i" .chain`
+chainNet all.sorted.chain old.chrom.sizes new.chrom.sizes net/all.net /dev/null
+mkdir -p over
+netChainSubset net/all.net all.sorted.chain over/all.chain
