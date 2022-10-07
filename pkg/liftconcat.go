@@ -265,22 +265,25 @@ func ReturnBed(inpath string, bed io.Reader, tab io.Writer, chrcol int, bpcols [
 	split := lscan.ByByte('\t')
 	commentre := regexp.MustCompile(`^#`)
 	for lnum:=0; s.Scan(); lnum++ {
-		if !commentre.MatchString(s.Text()) {
-			if bedline, ok := changemap[lnum]; ok {
-				line = lscan.SplitByFunc(line, s.Text(), split)
-				line[chrcol] = bedline[0]
-				bp0, err := strconv.ParseInt(bedline[1], 0, 64)
-				if err != nil {
-					return err
-				}
-				line[bpcols[0]] = fmt.Sprintf("%d", bp0+1)
-				if len(bpcols) == 2 {
-					line[bpcols[1]] = bedline[2]
-				}
-				fmt.Fprintf(tab, "%s\n", strings.Join(line, "\t"))
-			} else {
-				fmt.Fprintf(tab, "%s\n", s.Text())
+		if commentre.MatchString(s.Text()) {
+			fmt.Fprintf(tab, "%s\n", s.Text())
+			continue
+		}
+
+		if bedline, ok := changemap[lnum]; ok {
+			line = lscan.SplitByFunc(line, s.Text(), split)
+			line[chrcol] = bedline[0]
+			bp0, err := strconv.ParseInt(bedline[1], 0, 64)
+			if err != nil {
+				return err
 			}
+			line[bpcols[0]] = fmt.Sprintf("%d", bp0+1)
+			if len(bpcols) == 2 {
+				line[bpcols[1]] = bedline[2]
+			}
+			fmt.Fprintf(tab, "%s\n", strings.Join(line, "\t"))
+		} else {
+			fmt.Fprintf(tab, "%s\n", s.Text())
 		}
 	}
 	return nil
