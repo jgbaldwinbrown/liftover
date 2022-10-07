@@ -1,8 +1,12 @@
 #!/bin/bash
 set -e
 
-go build liftconcat.go
+(cd cmd && (
+	ls *.go | while read i ; do
+		go build $i
+	done
+))
 
-cp liftconcat ~/mybin
+cp cmd/liftconcat ~/mybin
 cp lift.sh ~/mybin/lift
 chmod +x ~/mybin/lift
