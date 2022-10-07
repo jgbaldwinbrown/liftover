@@ -68,10 +68,6 @@ func GetFlags() Flags {
 }
 
 func ExecLiftOver(inpath, outpath, unmappedpath, chainpath string) error {
-	debug := exec.Command("cat", inpath)
-	debug.Stdout = os.Stdout
-	debug.Run()
-
 	cmd := exec.Command("liftOver", "-bedPlus=3", inpath, chainpath, outpath, unmappedpath)
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = os.Stdin
@@ -127,7 +123,7 @@ func UncleanBed(in, clean io.Reader, out io.Writer, linename string) error {
 }
 
 func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename string) error {
-	in, err := os.Open(inpath)
+	in, err := GzOptOpen(inpath)
 	if err != nil {
 		return err
 	}
@@ -162,7 +158,7 @@ func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename st
 	}
 	defer outclean.Close()
 
-	in, err = os.Open(inpath)
+	in, err = GzOptOpen(inpath)
 	if err != nil {
 		return err
 	}
@@ -249,7 +245,7 @@ func ReturnBed(inpath string, bed io.Reader, tab io.Writer, chrcol int, bpcols [
 		return err
 	}
 
-	in, err := os.Open(inpath)
+	in, err := GzOptOpen(inpath)
 	if err != nil {
 		return err
 	}
@@ -296,7 +292,7 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 	}
 	defer os.Remove(inbed.Name())
 
-	intab, err := os.Open(inpath)
+	intab, err := GzOptOpen(inpath)
 	if err != nil {
 		return err
 	}
@@ -334,12 +330,12 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 }
 
 func LiftOverFull(f Flags) error {
-	out := os.Stdout
+	var out io.WriteCloser = os.Stdout
 
 	if f.Outpath != "stdout" {
 		var err error
 		fmt.Println("using hardcoded outpath")
-		out, err = os.Create(f.Outpath)
+		out, err = GzOptCreate(f.Outpath)
 		if err != nil {
 			return err
 		}
