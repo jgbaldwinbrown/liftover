@@ -1,6 +1,7 @@
 package liftover
 
 import (
+	"compress/gzip"
 	"strings"
 	"github.com/jgbaldwinbrown/lscan/pkg"
 	"strconv"
@@ -67,10 +68,10 @@ func GetFlags() Flags {
 	return f
 }
 
-func ExecLiftOver(inpath, outpath, unmappedpath, chainpath string) error {
-	cmd := exec.Command("liftOver", "-bedPlus=3", inpath, chainpath, outpath, unmappedpath)
-	cmd.Stdout = os.Stdout
-	cmd.Stdin = os.Stdin
+func ExecLiftOver(in io.Reader, out io.Writer, unmappedpath, chainpath string) error {
+	cmd := exec.Command("liftOver", "-bedPlus=3", "stdin", chainpath, "stdout", unmappedpath)
+	cmd.Stdout = out
+	cmd.Stdin = in
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
@@ -129,44 +130,52 @@ func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename st
 	}
 	defer in.Close()
 
-	inclean, err := os.CreateTemp("./", "inclean_*.bed")
+	temps, err := CreateTemps([]string{"./", "./"}, []string{"inclean_*.bed.gz", "outclean_*.bed.gz"})
 	if err != nil {
 		return err
 	}
-	err = CleanInput(in, inclean, linename)
+	defer RemoveAll(temps...)
+
+	inclean := temps[0]
+	gzinclean := gzip.NewWriter(inclean)
+	err = CleanInput(in, gzinclean, linename)
+	gzinclean.Close()
 	inclean.Close()
-	defer os.Remove(inclean.Name())
 	if err != nil {
 		return err
 	}
 
-	outclean, err := os.CreateTemp("./", "outclean_*.bed")
+	gzinclean_r, err := GzOptOpen(inclean.Name())
 	if err != nil {
 		return err
 	}
+	defer gzinclean_r.Close()
+
+	outclean := temps[1]
+	gzoutclean := gzip.NewWriter(outclean)
+
+	err = ExecLiftOver(gzinclean_r, gzoutclean, unmappedpath, chainpath)
+	if err != nil {
+		return err
+	}
+	gzoutclean.Close()
 	outclean.Close()
-	defer os.Remove(outclean.Name())
 
-	err = ExecLiftOver(inclean.Name(), outclean.Name(), unmappedpath, chainpath)
+	gzoutclean_r, err := GzOptOpen(outclean.Name())
 	if err != nil {
-		return err
+		return fmt.Errorf("creating gzoutclean_r: %w", err)
 	}
-
-	outclean, err = os.Open(outclean.Name())
-	if err != nil {
-		return err
-	}
-	defer outclean.Close()
+	defer gzoutclean_r.Close()
 
 	in, err = GzOptOpen(inpath)
 	if err != nil {
-		return err
+		return fmt.Errorf("creating in: %w", err)
 	}
 	defer in.Close()
 
-	err = UncleanBed(in, outclean, out, linename)
+	err = UncleanBed(in, gzoutclean_r, out, linename)
 	if err != nil {
-		return err
+		return fmt.Errorf("UncleanBed: %w", err)
 	}
 
 	return nil
@@ -286,11 +295,13 @@ func ReturnBed(inpath string, bed io.Reader, tab io.Writer, chrcol int, bpcols [
 }
 
 func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename string, chrcol int, bpcols []int) error {
-	inbed, err := os.CreateTemp("./", "inbed_*.bed")
+	temps, err := CreateTemps([]string{"./", "./"}, []string{"inbed_*.bed.gz", "outbed_*.bed.gz"})
 	if err != nil {
 		return err
 	}
-	defer os.Remove(inbed.Name())
+	defer RemoveAll(temps...)
+	inbed := temps[0]
+	outbed := temps[1]
 
 	intab, err := GzOptOpen(inpath)
 	if err != nil {
@@ -298,32 +309,30 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 	}
 	defer intab.Close()
 
-	err = ExtractBed(intab, inbed, chrcol, bpcols)
+	gzinbed := gzip.NewWriter(inbed)
+	err = ExtractBed(intab, gzinbed, chrcol, bpcols)
+	gzinbed.Close()
 	inbed.Close()
 	if err != nil {
 		return err
 	}
 
-	outbed, err := os.CreateTemp("./", "outbed_*.bed")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(outbed.Name())
-
-	err = LiftOver(inbed.Name(), outbed, unmappedpath, chainpath, linename)
+	gzoutbed := gzip.NewWriter(outbed)
+	err = LiftOver(inbed.Name(), gzoutbed, unmappedpath, chainpath, linename)
+	gzoutbed.Close()
 	outbed.Close()
 	if err != nil {
 		return err
 	}
 
-	outbed, err = os.Open(outbed.Name())
+	outbed_r, err := GzOptOpen(outbed.Name())
 	if err != nil {
-		return err
+		return fmt.Errorf("GzOptOpen: %w", err)
 	}
 
-	err = ReturnBed(inpath, outbed, out, chrcol, bpcols)
+	err = ReturnBed(inpath, outbed_r, out, chrcol, bpcols)
 	if err != nil {
-		return err
+		return fmt.Errorf("ReturnBed: %w", err)
 	}
 
 	return nil
@@ -334,7 +343,6 @@ func LiftOverFull(f Flags) error {
 
 	if f.Outpath != "stdout" {
 		var err error
-		fmt.Println("using hardcoded outpath")
 		out, err = GzOptCreate(f.Outpath)
 		if err != nil {
 			return err
