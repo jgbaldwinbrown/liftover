@@ -26,6 +26,7 @@ type Flags struct {
 	Chrcol int
 	Bpcol1 int
 	Bpcols []int
+	Tmpdir string
 }
 
 func GetFlags() Flags {
@@ -36,6 +37,7 @@ func GetFlags() Flags {
 	flag.StringVar(&f.Chainpath, "c", "", ".chain file to use for liftover (required).")
 	flag.StringVar(&f.LineName, "l", "", "Name of line in chromomomes of input file to lift over (required).")
 	flag.StringVar(&f.TabDel, "t", "", "comma-separated list of chromosome column, basepair start column, and optional basepair end column (to convert tab-delimited files")
+	flag.StringVar(&f.Tmpdir, "T", "./", "Directory in which to store temporary files; current dir (./) by default")
 	flag.Parse()
 	if f.Inpath == "" {
 		panic(fmt.Errorf("input file path is required"))
@@ -123,14 +125,14 @@ func UncleanBed(in, clean io.Reader, out io.Writer, linename string) error {
 	return nil
 }
 
-func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename string) error {
+func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename, tmpdir string) error {
 	in, err := GzOptOpen(inpath)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	temps, err := CreateTemps([]string{"./", "./"}, []string{"inclean_*.bed.gz", "outclean_*.bed.gz"})
+	temps, err := CreateTemps([]string{tmpdir, tmpdir}, []string{"inclean_*.bed.gz", "outclean_*.bed.gz"})
 	if err != nil {
 		return err
 	}
@@ -294,8 +296,8 @@ func ReturnBed(inpath string, bed io.Reader, tab io.Writer, chrcol int, bpcols [
 	return nil
 }
 
-func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename string, chrcol int, bpcols []int) error {
-	temps, err := CreateTemps([]string{"./", "./"}, []string{"inbed_*.bed.gz", "outbed_*.bed.gz"})
+func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename string, chrcol int, bpcols []int, tmpdir string) error {
+	temps, err := CreateTemps([]string{tmpdir, tmpdir}, []string{"inbed_*.bed.gz", "outbed_*.bed.gz"})
 	if err != nil {
 		return err
 	}
@@ -318,7 +320,7 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 	}
 
 	gzoutbed := gzip.NewWriter(outbed)
-	err = LiftOver(inbed.Name(), gzoutbed, unmappedpath, chainpath, linename)
+	err = LiftOver(inbed.Name(), gzoutbed, unmappedpath, chainpath, linename, tmpdir)
 	gzoutbed.Close()
 	outbed.Close()
 	if err != nil {
@@ -352,9 +354,9 @@ func LiftOverFull(f Flags) error {
 
 	var err error
 	if f.TabDel != "" {
-		err = LiftTabDel(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName, f.Chrcol, f.Bpcols)
+		err = LiftTabDel(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName, f.Chrcol, f.Bpcols, f.Tmpdir)
 	} else {
-		err = LiftOver(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName)
+		err = LiftOver(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName, f.Tmpdir)
 	}
 
 	if err != nil {
