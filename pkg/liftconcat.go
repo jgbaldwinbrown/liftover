@@ -1,7 +1,6 @@
 package liftover
 
 import (
-	"compress/gzip"
 	"strings"
 	"github.com/jgbaldwinbrown/lscan/pkg"
 	"strconv"
@@ -139,10 +138,9 @@ func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename, t
 	defer RemoveAll(temps...)
 
 	inclean := temps[0]
-	gzinclean := gzip.NewWriter(inclean)
+	gzinclean := GzWrapWriter(inclean)
 	err = CleanInput(in, gzinclean, linename)
 	gzinclean.Close()
-	inclean.Close()
 	if err != nil {
 		return err
 	}
@@ -154,14 +152,13 @@ func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename, t
 	defer gzinclean_r.Close()
 
 	outclean := temps[1]
-	gzoutclean := gzip.NewWriter(outclean)
+	gzoutclean := GzWrapWriter(outclean)
 
 	err = ExecLiftOver(gzinclean_r, gzoutclean, unmappedpath, chainpath)
 	if err != nil {
 		return err
 	}
 	gzoutclean.Close()
-	outclean.Close()
 
 	gzoutclean_r, err := GzOptOpen(outclean.Name())
 	if err != nil {
@@ -311,18 +308,16 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 	}
 	defer intab.Close()
 
-	gzinbed := gzip.NewWriter(inbed)
+	gzinbed := GzWrapWriter(inbed)
 	err = ExtractBed(intab, gzinbed, chrcol, bpcols)
 	gzinbed.Close()
-	inbed.Close()
 	if err != nil {
 		return err
 	}
 
-	gzoutbed := gzip.NewWriter(outbed)
+	gzoutbed := GzWrapWriter(outbed)
 	err = LiftOver(inbed.Name(), gzoutbed, unmappedpath, chainpath, linename, tmpdir)
 	gzoutbed.Close()
-	outbed.Close()
 	if err != nil {
 		return err
 	}
