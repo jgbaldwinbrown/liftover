@@ -185,10 +185,12 @@ func ExtractBedLine(line []string, bed io.Writer, chrcol int, bpcols []int, line
 	if err != nil {
 		return err
 	}
-	if len(bpcols) == 2 {
-		fmt.Fprintf(bed, "%v\t%v\t%v\t%v\n", line[chrcol], bp0-1, line[bpcols[1]], linenum)
-	} else {
-		fmt.Fprintf(bed, "%v\t%v\t%v\t%v\n", line[chrcol], bp0-1, bp0, linenum)
+	if line[chrcol] != "!" {
+		if len(bpcols) == 2 {
+			fmt.Fprintf(bed, "%v\t%v\t%v\t%v\n", line[chrcol], bp0-1, line[bpcols[1]], linenum)
+		} else {
+			fmt.Fprintf(bed, "%v\t%v\t%v\t%v\n", line[chrcol], bp0-1, bp0, linenum)
+		}
 	}
 
 	return nil
