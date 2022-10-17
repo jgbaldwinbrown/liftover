@@ -1,6 +1,7 @@
 package liftover
 
 import (
+	"sync"
 	"strings"
 	"github.com/jgbaldwinbrown/lscan/pkg"
 	"strconv"
@@ -26,6 +27,8 @@ type Flags struct {
 	Bpcol1 int
 	Bpcols []int
 	Tmpdir string
+	Threads int
+	Chunksize int
 }
 
 func GetFlags() Flags {
@@ -37,6 +40,8 @@ func GetFlags() Flags {
 	flag.StringVar(&f.LineName, "l", "", "Name of line in chromomomes of input file to lift over (required).")
 	flag.StringVar(&f.TabDel, "t", "", "comma-separated list of chromosome column, basepair start column, and optional basepair end column (to convert tab-delimited files")
 	flag.StringVar(&f.Tmpdir, "T", "./", "Directory in which to store temporary files; current dir (./) by default")
+	flag.IntVar(&f.Threads, "j", 1, "Jobs (threads) to use (default 1).")
+	flag.IntVar(&f.Chunksize, "C", -1, "Number of lines per parallel chunk (default all lines in 1 chunk).")
 	flag.Parse()
 	if f.Inpath == "" {
 		panic(fmt.Errorf("input file path is required"))
@@ -127,13 +132,13 @@ func UncleanBed(in, clean io.Reader, out io.Writer, linename string) error {
 func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename, tmpdir string) error {
 	in, err := GzOptOpen(inpath)
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftOver: inpath opening error %w", err)
 	}
 	defer in.Close()
 
 	temps, err := CreateTemps([]string{tmpdir, tmpdir}, []string{"inclean_*.bed.gz", "outclean_*.bed.gz"})
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftOver: createtemps %w", err)
 	}
 	defer RemoveAll(temps...)
 
@@ -142,12 +147,12 @@ func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename, t
 	err = CleanInput(in, gzinclean, linename)
 	gzinclean.Close()
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftOver: cleaninput %w", err)
 	}
 
 	gzinclean_r, err := GzOptOpen(inclean.Name())
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftOver: opening inclean %w", err)
 	}
 	defer gzinclean_r.Close()
 
@@ -156,7 +161,7 @@ func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename, t
 
 	err = ExecLiftOver(gzinclean_r, gzoutclean, unmappedpath, chainpath)
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftOver: execliftover %w", err)
 	}
 	gzoutclean.Close()
 
@@ -337,6 +342,189 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 	return nil
 }
 
+type Errors []error
+
+func (es Errors) Error() string {
+	var b strings.Builder
+	for _, e := range es {
+		fmt.Fprintf(&b, "%v\n", e)
+	}
+	return b.String()
+}
+
+type ParallelArgs struct {
+	Inpath string
+	Out io.WriteCloser
+	Unmappedpath string
+}
+
+func CombineOuts(paths []string, out io.Writer) error {
+	for _, path := range paths {
+		r, err := GzOptOpen(path)
+		if err == io.EOF {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("CombineOuts file opening: %w", err)
+		}
+		defer r.Close()
+		io.Copy(out, r)
+	}
+	return nil
+}
+
+func CombineOutsToPath(paths []string, outpath string) error {
+	out, err := GzOptCreate(outpath)
+	if err != nil {
+		return fmt.Errorf("CombineOutsToPath outfile opening: %w", err)
+	}
+	defer out.Close()
+
+	return CombineOuts(paths, out)
+}
+
+type ParallelIoSet struct {
+	In *os.File
+	Inwriter io.WriteCloser
+	Out *os.File
+	Outwriter io.WriteCloser
+	Unmapped *os.File
+}
+
+func CreateParallelIoSet(tmpdir string) (ParallelIoSet, error) {
+	temps, err := CreateTemps(
+		[]string{tmpdir, tmpdir, tmpdir},
+		[]string{
+			"inpartial_*.bed.gz",
+			"outpartial_*.bed.gz",
+			"unmappedpartial_*.bed.gz",
+		},
+	)
+	if err != nil {
+		return ParallelIoSet{}, fmt.Errorf("CreateParallelIoSet: %w", err)
+	}
+
+	temps[2].Close()
+	gzin := GzWrapWriter(temps[0])
+	gzout := GzWrapWriter(temps[1])
+
+	return ParallelIoSet{
+		temps[0],
+		gzin,
+		temps[1],
+		gzout,
+		temps[2],
+	}, nil
+}
+
+func ParallelRun(fullinpath string, fullout io.Writer, fullunmappedpath string, threads, chunksize int, tmpdir string, f func(inpath string, out io.Writer, unmappedpath string) error) error {
+	var wg sync.WaitGroup
+	var errwg sync.WaitGroup
+	jobs := make(chan ParallelArgs, threads * 8)
+	errchan := make(chan error, threads * 8)
+	var errs Errors
+
+	errwg.Add(1)
+	go func() {
+		for err := range errchan {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("Error handler: %w", err))
+			}
+		}
+		errwg.Done()
+	}()
+
+	wg.Add(threads)
+	for i:=0; i<threads; i++ {
+		go func() {
+			for job := range jobs {
+				errchan <- f(job.Inpath, job.Out, job.Unmappedpath)
+				job.Out.Close()
+			}
+			wg.Done()
+		}()
+	}
+
+	r, err := GzOptOpen(fullinpath)
+	if err != nil {
+		close(jobs)
+		wg.Wait()
+		close(errchan)
+		errwg.Wait()
+		return errs
+	}
+	defer r.Close()
+
+	s := bufio.NewScanner(r)
+	s.Buffer([]byte{}, 1e12)
+
+	var outpartials []string
+	var unmappedpartials []string
+	started := false
+
+	var ioset ParallelIoSet
+	for i:=0; s.Scan(); i++ {
+
+		if i % chunksize == 0 {
+			if started {
+				ioset.Inwriter.Close()
+				jobs <- ParallelArgs{ioset.In.Name(), ioset.Outwriter, ioset.Unmapped.Name()}
+
+			}
+			ioset, err = CreateParallelIoSet(tmpdir)
+			defer func(ioset ParallelIoSet) {
+				ioset.Outwriter.Close()
+				os.Remove(ioset.In.Name())
+				os.Remove(ioset.Out.Name())
+				os.Remove(ioset.Unmapped.Name())
+			}(ioset)
+
+			started = true
+
+			if err != nil {
+				close(jobs)
+				wg.Wait()
+				close(errchan)
+				errwg.Wait()
+				errs = append(errs, err)
+				return errs
+			}
+
+
+			outpartials = append(outpartials, ioset.Out.Name())
+			unmappedpartials = append(unmappedpartials, ioset.Unmapped.Name())
+		}
+
+
+		fmt.Fprintln(ioset.Inwriter, s.Text())
+	}
+	if started {
+		ioset.Inwriter.Close()
+		jobs <- ParallelArgs{ioset.In.Name(), ioset.Outwriter, ioset.Unmapped.Name()}
+
+	}
+
+	close(jobs)
+	wg.Wait()
+	close(errchan)
+	errwg.Wait()
+
+	err = CombineOuts(outpartials, fullout)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("CombineOuts: %w", err))
+	}
+
+	err = CombineOutsToPath(unmappedpartials, fullunmappedpath)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("CombineOutsToPath: %w", err))
+	}
+
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
+}
+
 func LiftOverFull(f Flags) error {
 	var out io.WriteCloser = os.Stdout
 
@@ -350,10 +538,23 @@ func LiftOverFull(f Flags) error {
 	}
 
 	var err error
-	if f.TabDel != "" {
-		err = LiftTabDel(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName, f.Chrcol, f.Bpcols, f.Tmpdir)
+
+	if f.Threads < 2 || f.Chunksize < 1 {
+		if f.TabDel != "" {
+			err = LiftTabDel(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName, f.Chrcol, f.Bpcols, f.Tmpdir)
+		} else {
+			err = LiftOver(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName, f.Tmpdir)
+		}
 	} else {
-		err = LiftOver(f.Inpath, out, f.Unmappedpath, f.Chainpath, f.LineName, f.Tmpdir)
+		if f.TabDel != "" {
+			err = ParallelRun(f.Inpath, out, f.Unmappedpath, f.Threads, f.Chunksize, f.Tmpdir, func(inpath string, outarg io.Writer, unmappedpath string) error {
+				return LiftTabDel(inpath, outarg, unmappedpath, f.Chainpath, f.LineName, f.Chrcol, f.Bpcols, f.Tmpdir)
+			})
+		} else {
+			err = ParallelRun(f.Inpath, out, f.Unmappedpath, f.Threads, f.Chunksize, f.Tmpdir, func(inpath string, outarg io.Writer, unmappedpath string) error {
+				return LiftOver(inpath, outarg, unmappedpath, f.Chainpath, f.LineName, f.Tmpdir)
+			})
+		}
 	}
 
 	if err != nil {
