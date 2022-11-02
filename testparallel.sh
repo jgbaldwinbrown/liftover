@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-./install.sh
+# ./install.sh
 
 time (
-	liftconcat \
+	./cmd/liftconcat \
 		-l ISO1 \
 		-i testconc.bed \
 		-c 3L.chain \
@@ -13,7 +13,7 @@ time (
 )
 
 time (
-	liftconcat \
+	./cmd/liftconcat \
 		-l W501 \
 		-i testdata5.pairs.gz \
 		-c all.chain \
@@ -22,7 +22,7 @@ time (
 		-j 8 \
 		-C 2
 
-	liftconcat \
+	./cmd/liftconcat \
 		-l W501 \
 		-i lift_part1.pairs.gz \
 		-c all.chain \

@@ -1,6 +1,7 @@
 package liftover
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"compress/gzip"
@@ -23,6 +24,11 @@ func (g *GzReader) Close() error {
 }
 
 func GzOptOpen(path string) (io.ReadCloser, error) {
+	// fmt.Println("opening path:", path)
+	// cmd := exec.Command("cat", path)
+	// cmd.Stdout = os.Stdout
+	// cmd.Run()
+	// fmt.Println("end path contents")
 	gzre := regexp.MustCompile(`\.gz$`)
 	if !gzre.MatchString(path) {
 		return os.Open(path)
@@ -33,13 +39,13 @@ func GzOptOpen(path string) (io.ReadCloser, error) {
 	var err error
 	gzreader.rc, err = os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GzOptOpen: %w", err)
 	}
 
 	gzreader.gzr, err = gzip.NewReader(gzreader.rc)
 	if err != nil {
 		gzreader.rc.Close()
-		return nil, err
+		return nil, fmt.Errorf("GzOptOpen: %w", err)
 	}
 
 	return &gzreader, nil

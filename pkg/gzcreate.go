@@ -1,6 +1,7 @@
 package liftover
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"compress/gzip"
@@ -36,7 +37,7 @@ func GzOptCreate(path string) (io.WriteCloser, error) {
 	var err error
 	gzwriter.wc, err = os.Create(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GzOptCreate: %w", err)
 	}
 	gzwriter.bw = bufio.NewWriter(gzwriter.wc)
 	gzwriter.gzw = gzip.NewWriter(gzwriter.bw)

@@ -33,7 +33,7 @@ func CreateTemps(dirs []string, prefixes []string) ([]*os.File, error) {
 		if err != nil {
 			CloseAny(files...)
 			RemoveAll(files...)
-			return nil, err
+			return nil, fmt.Errorf("CreateTemps: %w", err)
 		}
 		files = append(files, file)
 	}

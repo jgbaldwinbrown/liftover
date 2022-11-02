@@ -68,7 +68,7 @@ func GetFlags() Flags {
 			nparsed, err = fmt.Sscanf(f.TabDel, "%d,%d,%d", &f.Chrcol, &f.Bpcols[0], &f.Bpcols[1])
 		}
 		if nparsed != ncom+1 || err != nil {
-			panic(fmt.Errorf("Could not parse tabdel %v", f.TabDel))
+			panic(fmt.Errorf("Could not parse tabdel %v; err: %w", f.TabDel, err))
 		}
 	}
 	return f
@@ -89,7 +89,7 @@ func ExecLiftOver(in io.Reader, out io.Writer, unmappedpath, chainpath string) e
 func CleanInput(in io.Reader, out io.Writer, linename string) error {
 	re, err := regexp.Compile(`^([^	_]*)_` + linename)
 	if err != nil {
-		return err
+		return fmt.Errorf("CleanInput: %w", err)
 	}
 
 	s := bufio.NewScanner(in)
@@ -105,7 +105,7 @@ func CleanInput(in io.Reader, out io.Writer, linename string) error {
 func UncleanBed(in, clean io.Reader, out io.Writer, linename string) error {
 	uncleanre, err := regexp.Compile(`^[^	_]*_` + linename)
 	if err != nil {
-		return err
+		return fmt.Errorf("UncleanBed: %w, err")
 	}
 
 	cleanre := regexp.MustCompile(`^[^	]*`)
@@ -188,7 +188,7 @@ func LiftOver(inpath string, out io.Writer, unmappedpath, chainpath, linename, t
 func ExtractBedLine(line []string, bed io.Writer, chrcol int, bpcols []int, linenum int) error {
 	bp0, err := strconv.ParseInt(line[bpcols[0]], 0, 64)
 	if err != nil {
-		return err
+		return fmt.Errorf("ExtractBedLine: in strconv.ParseInt: %w", err)
 	}
 	if line[chrcol] != "!" {
 		if len(bpcols) == 2 {
@@ -216,7 +216,7 @@ func ExtractBed(tab io.Reader, bed io.Writer, chrcol int, bpcols []int) error {
 			line = lscan.SplitByFunc(line, s.Text(), split)
 			err := ExtractBedLine(line, bed, chrcol, bpcols, linenum)
 			if err != nil {
-				return err
+				return fmt.Errorf("ExtractBed: in ExtractBedLine: %w", err)
 			}
 		}
 	}
@@ -230,7 +230,7 @@ func MapBedLine(m map[int][]string, l []string) error {
 
 	lnum, err := strconv.ParseInt(l[3], 0, 64)
 	if err != nil {
-		return err
+		return fmt.Errorf("MapBedLine: in ParseInt: %w", err)
 	}
 
 	m[int(lnum)] = []string{l[0], l[1], l[2]}
@@ -248,7 +248,7 @@ func BedMap(bed io.Reader) (map[int][]string, error) {
 		line = lscan.SplitByFunc(line, s.Text(), split)
 		err := MapBedLine(m, line)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("BedMap: in MapBedLine %w", err)
 		}
 	}
 	return m, nil
@@ -257,12 +257,12 @@ func BedMap(bed io.Reader) (map[int][]string, error) {
 func ReturnBed(inpath string, bed io.Reader, tab io.Writer, chrcol int, bpcols []int) error {
 	changemap, err := BedMap(bed)
 	if err != nil {
-		return err
+		return fmt.Errorf("ReturnBed: in BedMap %w", err)
 	}
 
 	in, err := GzOptOpen(inpath)
 	if err != nil {
-		return err
+		return fmt.Errorf("ReturnBed: in GzOptOpen %w", err)
 	}
 	defer in.Close()
 
@@ -286,7 +286,7 @@ func ReturnBed(inpath string, bed io.Reader, tab io.Writer, chrcol int, bpcols [
 			line[chrcol] = bedline[0]
 			bp0, err := strconv.ParseInt(bedline[1], 0, 64)
 			if err != nil {
-				return err
+				return fmt.Errorf("ReturnBed: in ParseInt %w", err)
 			}
 			line[bpcols[0]] = fmt.Sprintf("%d", bp0+1)
 			if len(bpcols) == 2 {
@@ -303,7 +303,7 @@ func ReturnBed(inpath string, bed io.Reader, tab io.Writer, chrcol int, bpcols [
 func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename string, chrcol int, bpcols []int, tmpdir string) error {
 	temps, err := CreateTemps([]string{tmpdir, tmpdir}, []string{"inbed_*.bed.gz", "outbed_*.bed.gz"})
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftTabDel: in CreateTemps %w", err)
 	}
 	defer RemoveAll(temps...)
 	inbed := temps[0]
@@ -311,7 +311,7 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 
 	intab, err := GzOptOpen(inpath)
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftTabDel: in GzOptOpen %w", err)
 	}
 	defer intab.Close()
 
@@ -319,14 +319,14 @@ func LiftTabDel(inpath string, out io.Writer, unmappedpath, chainpath, linename 
 	err = ExtractBed(intab, gzinbed, chrcol, bpcols)
 	gzinbed.Close()
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftTabDel: in ExtractBed %w", err)
 	}
 
 	gzoutbed := GzWrapWriter(outbed)
 	err = LiftOver(inbed.Name(), gzoutbed, unmappedpath, chainpath, linename, tmpdir)
 	gzoutbed.Close()
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftTabDel: in LiftOver %w", err)
 	}
 
 	outbed_r, err := GzOptOpen(outbed.Name())
@@ -397,7 +397,7 @@ func CreateParallelIoSet(tmpdir string) (ParallelIoSet, error) {
 		[]string{
 			"inpartial_*.bed.gz",
 			"outpartial_*.bed.gz",
-			"unmappedpartial_*.bed.gz",
+			"unmappedpartial_*.bed",
 		},
 	)
 	if err != nil {
@@ -451,7 +451,8 @@ func ParallelRun(fullinpath string, fullout io.Writer, fullunmappedpath string, 
 		wg.Wait()
 		close(errchan)
 		errwg.Wait()
-		return errs
+		errs = append(errs, err)
+		return fmt.Errorf("ParallelRun: %w", errs)
 	}
 	defer r.Close()
 
@@ -487,7 +488,7 @@ func ParallelRun(fullinpath string, fullout io.Writer, fullunmappedpath string, 
 				close(errchan)
 				errwg.Wait()
 				errs = append(errs, err)
-				return errs
+				return fmt.Errorf("ParallelRun: %w", errs)
 			}
 
 
@@ -520,7 +521,7 @@ func ParallelRun(fullinpath string, fullout io.Writer, fullunmappedpath string, 
 	}
 
 	if len(errs) > 0 {
-		return errs
+		return fmt.Errorf("ParallelRun: %w", errs)
 	}
 	return nil
 }
@@ -532,7 +533,7 @@ func LiftOverFull(f Flags) error {
 		var err error
 		out, err = GzOptCreate(f.Outpath)
 		if err != nil {
-			return err
+			return fmt.Errorf("LiftOverFull: %w", err)
 		}
 		defer out.Close()
 	}
@@ -558,7 +559,7 @@ func LiftOverFull(f Flags) error {
 	}
 
 	if err != nil {
-		return err
+		return fmt.Errorf("LiftOverFull: %w", err)
 	}
 
 	return nil

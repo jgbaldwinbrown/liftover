@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/jgbaldwinbrown/liftover/pkg"
 )
 
@@ -10,6 +11,7 @@ func main() {
 	f := liftover.GetFlags()
 	err := liftover.LiftOverFull(f)
 	if err != nil {
+		fmt.Printf("err: %v\n", err)
 		panic(err)
 	}
 }
