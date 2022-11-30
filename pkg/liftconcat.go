@@ -64,7 +64,7 @@ func GetFlags() Flags {
 			f.Bpcols = make([]int, 1)
 			nparsed, err = fmt.Sscanf(f.TabDel, "%d,%d", &f.Chrcol, &f.Bpcols[0])
 		} else {
-			f.Bpcols = make([]int, 1)
+			f.Bpcols = make([]int, 2)
 			nparsed, err = fmt.Sscanf(f.TabDel, "%d,%d,%d", &f.Chrcol, &f.Bpcols[0], &f.Bpcols[1])
 		}
 		if nparsed != ncom+1 || err != nil {
